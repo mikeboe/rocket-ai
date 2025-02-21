@@ -1,0 +1,16 @@
+export enum AiModelType {
+    Gpt4o = 'gpt-4o',
+    Gpt4oMini = 'gpt-4o-mini',
+    DallE3 = 'dall-e3',
+    GptTextToSpeech = 'tts-1',
+    O1Preview = 'o1-preview',
+    O1Mini = 'o1-mini',
+    Claude35SonnetLatest = 'claude-3-5-sonnet-latest',
+    Claude35HaikuLatest = 'claude-3-5-haiku-latest',
+    Gemini20FlashLatest = 'gemini-2.0-flash-latest',
+    Gemini15FlashLatest = 'gemini-1.5-flash-latest',
+    Gemini15ProLatest = 'gemini-1.5-pro-latest',
+    Llama33 = 'fw-llama-3-3',
+    DeepSeekV3 = 'fw-deepseek-v3',
+    DeepSeekR1 = 'fw-deepseek-r1',
+}
