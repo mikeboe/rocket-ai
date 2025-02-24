@@ -22,8 +22,6 @@ export class Tool {
     }
 
     public getQueryFormat() {
-        console.log("query", JSON.stringify(generateSchema(this.queryFormat)));
-
         return JSON.stringify(generateSchema(this.queryFormat));
     }
 }

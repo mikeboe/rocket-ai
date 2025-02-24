@@ -24,6 +24,8 @@ FIREWORKS_API_KEY=
 
 ## Usage
 
+### Client
+
 ```typescript jsx
 import {AiClient} from 'rocket-ai';
 
@@ -76,6 +78,61 @@ const structuredOutput = aiClient
         message: [{role: "user", content: "tell me a joke"}],
         systemPrompt: 'You are a helpful assistant.',
     });
+```
+
+### Agent
+
+To use the agent, you need to have at least one tool. Create a sample tool that fetches weather data:
+
+```typescript jsx
+//Weather API Tool
+import {z} from "zod";
+import {tool} from "rocket-ai"
+
+export const weatherApi = tool(
+    async ({city, country}: { city: string, country?: string }): Promise<any> => {
+
+        if (!city) {
+            throw new Error('City is required');
+        }
+
+        const key = "xxxxxx";
+
+        const response = await fetch(`https://api.openweathermap.org/data/2.5/weather?q=${city},${country}&appid=${key}`)
+
+        const res = await response.json()
+
+        return JSON.stringify(res, null, 2)
+    },
+    {
+        name: "weatherApi",
+        description: "Get weather data for a city.",
+        queryFormat: z.object({
+            city: z.string(),
+            country: z.string(),
+        }),
+    }
+)
+```
+Now you can use the agent to interact with the tool:
+
+```typescript jsx
+import {Agent} from ".rocket-ai";
+import {weatherApi} from "./weather-api";
+
+(async () => {
+    const systemInstruction = "You run in a loop of Thought, Action, PAUSE, Observation.\n" +
+        "At the end of the loop you output an Answer\n" +
+        "Strictly follow the provided response format.\n" +
+        "Use Thought to describe your thoughts about the question you have been asked.\n" +
+        "Use Action to run one of the actions available to you\n" +
+        "Observation will be the result of running those actions.\n";
+
+    const agent = new Agent(systemInstruction);
+    agent.registerTools([weatherApi]);
+    const response = await agent.executeTask("how is the weather in berlin??");
+    console.log(response);
+})();
 ```
 
 ## Available Models

@@ -1,108 +1,113 @@
 import {AiClient} from "../ai-client";
 import {z, ZodSchema} from "zod";
 import {ToolRegistry} from "./tools";
+import {PromptTemplate} from "../prompts";
+import {UsageCounter} from "../libs/usage-counter";
+import {ReActTemplate} from "../prompts/react-template";
+import {AiMessageResponse} from "../../types";
 
+/**
+ * The Agent class is responsible for managing the interaction with the AI client,
+ * handling tool registration, and executing tasks based on user input.
+ */
 export class Agent {
     private client: AiClient;
     private toolRegistry: ToolRegistry;
-    private systemPrompt: string;
+    private promptTemplate: ReActTemplate;
+    private usageCounter: UsageCounter;
 
-    constructor() {
+    /**
+     * Constructs an Agent instance.
+     * @param {string} name - The name of the agent.
+     * @param {string} [systemPrompt] - An optional system prompt to initialize the agent with.
+     */
+    constructor(name: string, systemPrompt?: string) {
         this.client = new AiClient();
         this.toolRegistry = new ToolRegistry();
 
-        this.systemPrompt = `You are a helpful agent that is given a task.
-    You have tools at your disposal, that you can call, and that will deliver you results.
-    Based on those results, you can make decisions and take actions.
-    Return the tool and its necessary input based on the information provided.
-    You will be penalised if you don't stick to the necessary response format.`;
+        this.promptTemplate = new ReActTemplate(name);
+        systemPrompt ? this.promptTemplate.addInstruction(systemPrompt) : this.promptTemplate.useDefaultInstructions();
+        this.usageCounter = new UsageCounter();
     }
 
-    // Register available tools
+    /**
+     * Registers a list of tools with the agent.
+     * @param {Array<any>} tools - An array of tools to register.
+     */
     registerTools(tools: Array<any>) {
         this.toolRegistry.registerTools(tools);
     }
 
-    // Execute the task by deciding the tool based on prompt and using it
-    async executeTask(input: string) {
-        // Collect tool information and schemas
+    /**
+     * Executes a task based on the provided input.
+     * @param {string} input - The input string for the task.
+     * @returns {Promise<AiMessageResponse>} - The final response from the agent.
+     */
+    async executeTask(input: string): Promise<AiMessageResponse> {
+        this.promptTemplate.addOriginalRequest(input);
+
         const toolInfos: Array<any> = [];
         const schemas: Record<string, ZodSchema<any>> = {};
         for (const toolName in this.toolRegistry.getAllTools()) {
             const toolInfo = this.toolRegistry.getToolInfo(toolName);
             if (toolInfo) {
                 toolInfos.push(toolInfo);
-                schemas[toolName] = toolInfo.queryFormat; // Assuming schema is part of the tool metadata
+                schemas[toolName] = toolInfo.queryFormat;
             }
         }
 
-        // Construct the AI prompt
-        const prompt = `${this.systemPrompt}
-    You have these tools at your disposal: ${JSON.stringify(toolInfos)}.
-    Strictly stick to the provided response format.`;
+        this.promptTemplate.addTool(`You have these tools at your disposal: ${JSON.stringify(toolInfos, null, 2)}`);
 
-        const messages = [
-            {
-                role: "user",
-                content: input,
-            },
-        ];
+        let nextPrompt = input;
+        let finalResponse: any = null;
+        const maxIterations = 10;
+        let count = 0;
 
-        // Define a dynamic schema for the AI response
-        const responseSchema = z.object({
-            tool: z.string().refine((toolName) => toolName in schemas, {message: "Invalid tool"}),
-            input: z.any(),
-        });
+        while (count < maxIterations) {
+            count++;
+            const prompt = this.promptTemplate.getInstructions();
 
-        // Interact with AI client to decide the tool and input
-        const response = await this.client
-            .withStructuredOutput(responseSchema)
-            .invoke({
+            const reActSchema = z.object({
+                thought: z.string(),
+                action: z.object({
+                    tool: z.string().refine((toolName) => toolName in schemas, {message: "Invalid tool"}),
+                    input: z.any(),
+                }).optional(),
+                answer: z.string(),
+            });
+
+            const response = await this.client.withStructuredOutput(
+                reActSchema
+            ).invoke({
                 model: 'gpt-4o-mini',
-                messages,
+                messages: [{role: "user", content: nextPrompt}],
                 systemPrompt: prompt,
-                temperature: 0.7,
+                temperature: 0,
             });
 
-        const parsedRes = JSON.parse(response.content);
-        console.log("parsedRes:", parsedRes);
+            this.usageCounter.addUsageTokens(response.usage);
+            const parsedResponse = reActSchema.safeParse(JSON.parse(response.content));
 
-        // Validate input using the selected tool's schema
-        const selectedSchema = schemas[parsedRes.tool];
-        // console.log("selectedSchema:", selectedSchema);
-        // const validation = selectedSchema.safeParse(parsedRes.input);
-        // if (!validation.success) {
-        //     throw new Error("Invalid input format: " + validation.error.message);
-        // }
+            if (parsedResponse.success && parsedResponse.data.answer) {
+                finalResponse = parsedResponse.data.answer;
+                break;
+            }
 
-        // Call the determined tool
-        const toolResponse = await this.toolRegistry.callTool(parsedRes.tool, parsedRes.input);
-        console.log("toolResponse:", toolResponse);
+            if (parsedResponse.success && parsedResponse.data.action) {
+                const action = parsedResponse.data.action;
 
-        // Craft final input for AI response generation
-        const finalInput =
-            `Initial Questions: ${input}\n` +
-            `Tool Response: ${JSON.stringify(toolResponse)}\n`;
+                const selectedSchema = schemas[action.tool];
+                const toolResponse = await this.toolRegistry.callTool(action.tool, action.input);
+                nextPrompt = `Observation: ${toolResponse}`;
+                this.promptTemplate.addIteration(count, nextPrompt);
+            } else {
+                break;  // No action or answer and to prevent infinite loop
+            }
+        }
 
-        const finalInputPrompt = `You are an AI assistant.
-    You are given the following returned values from an API and a question.
-    Provide a conversational answer.
-    Keep your answer short and focus on the most important things.`;
-
-        // Get final conversational answer from the AI client
-        return await this.client
-            .invoke({
-                model: 'gpt-4o-mini',
-                messages: [
-                    {
-                        role: "user",
-                        content: finalInput + "\n" + finalInputPrompt,
-                    },
-                ],
-                systemPrompt: '',
-                temperature: 0.7,
-            });
-
-
+        return {
+            content: finalResponse ? finalResponse : "No valid answer could be provided.",
+            usage: this.usageCounter.getUsage()
+        };
     }
 }

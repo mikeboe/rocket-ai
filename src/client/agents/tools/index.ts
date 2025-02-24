@@ -1,3 +1,3 @@
 export * from './tool-registry'
-export * from './weather-api'
-export * from './query-knowledge-base'
+export * from './tool'
+export * from './tool-helper'

@@ -3,7 +3,7 @@ import { OpenAiClient } from '../client/clients/open-ai';
 import { AnthropicAiClient } from '../client/clients/anthropic';
 import { GoogleAiClient } from '../client/clients/google';
 import { FireworksAiClient } from '../client/clients/fireworks-ai';
-import { AiModelType, AiMessageResponse, AiMessageResponseImage, AiVoice } from '../models';
+import { AiModelType, AiMessageResponse, AiMessageResponseImage, AiVoice } from '../types';
 import { z } from 'zod';
 
 describe('AiClient', () => {
